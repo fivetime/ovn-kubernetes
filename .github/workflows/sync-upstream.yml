@@ -74,7 +74,38 @@ jobs:
           done
 
       - name: Push tags
+        id: push_tags
         run: |
-          # Existing tags are not overwritten (no --force); only new upstream
-          # tags get pushed. Each new tag triggers docker.yml.
-          git push origin --tags
+          # Capture which tags are newly pushed -- the plain git push output
+          # marks them with "[new tag]" lines. Existing tags are not
+          # overwritten (no --force).
+          tmp=$(mktemp)
+          git push origin --tags 2>&1 | tee "$tmp"
+          new_tags=$(grep -oE '\[new tag\][[:space:]]+\S+' "$tmp" | awk '{print $NF}' | tr '\n' ' ')
+          echo "Newly pushed tags: ${new_tags:-(none)}"
+          echo "new_tags=${new_tags}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch docker.yml for new v* tags
+        if: steps.push_tags.outputs.new_tags != ''
+        env:
+          # workflow_dispatch via API requires a PAT -- GITHUB_TOKEN cannot
+          # trigger other workflows.
+          GH_TOKEN: ${{ secrets.SYNC_PAT }}
+        run: |
+          # Plain tag push events would use the docker.yml at the tag commit,
+          # which predates this fork's customizations. Dispatching from master
+          # makes the build use the current docker.yml definition while
+          # checking out the tag's code (via the workflow's `tag` input).
+          for tag in ${{ steps.push_tags.outputs.new_tags }}; do
+            case "$tag" in
+              v*)
+                echo "Dispatching docker.yml for ${tag}"
+                gh workflow run docker.yml --ref master -f "tag=${tag}" \
+                  --repo "${{ github.repository }}" \
+                  || echo "::warning::dispatch failed for ${tag}"
+                ;;
+              *)
+                echo "Skipping non-v* tag: ${tag}"
+                ;;
+            esac
+          done

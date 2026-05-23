@@ -4,6 +4,14 @@ on:
   push:
     branches: [ master, release-* ]
     tags: [ 'v*' ]
+  workflow_dispatch:
+    # Lets sync-upstream (or a human) rebuild any historical tag using the
+    # workflow definition on master. Plain tag-push events use the workflow
+    # file at the tag commit, which predates this repo's docker.yml tweaks.
+    inputs:
+      tag:
+        description: 'Git tag/ref to build and tag the image with (e.g. v1.3.0)'
+        required: true
 
 permissions:
   contents: read
@@ -37,6 +45,8 @@ jobs:
 
     - name: Check out code into the Go module directory
       uses: actions/checkout@v6
+      with:
+        ref: ${{ inputs.tag || github.ref }}
 
     - name: Log in to the GH Container registry
       uses: docker/login-action@v3
@@ -54,6 +64,12 @@ jobs:
       uses: docker/metadata-action@v5
       with:
         images: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPOSITORY }}/${{ env.FEDORA_IMAGE_NAME }}
+        tags: |
+          type=schedule
+          type=ref,event=branch
+          type=ref,event=tag
+          type=ref,event=pr
+          type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
 
     - name: Build and push Fedora based Docker image
       id: build
@@ -113,6 +129,12 @@ jobs:
       uses: docker/metadata-action@v5
       with:
         images: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPOSITORY }}/${{ env.FEDORA_IMAGE_NAME }}
+        tags: |
+          type=schedule
+          type=ref,event=branch
+          type=ref,event=tag
+          type=ref,event=pr
+          type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
 
     - name: Create manifest list and push
       working-directory: /tmp/digests
@@ -144,6 +166,8 @@ jobs:
 
     - name: Check out code into the Go module directory
       uses: actions/checkout@v6
+      with:
+        ref: ${{ inputs.tag || github.ref }}
 
     - name: Set up Go
       uses: actions/setup-go@v6
@@ -177,6 +201,12 @@ jobs:
       uses: docker/metadata-action@v5
       with:
         images: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPOSITORY }}/${{ env.UBUNTU_IMAGE_NAME }}
+        tags: |
+          type=schedule
+          type=ref,event=branch
+          type=ref,event=tag
+          type=ref,event=pr
+          type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
 
     - name: Build and push Ubuntu based Docker image
       id: build
@@ -234,6 +264,12 @@ jobs:
       uses: docker/metadata-action@v5
       with:
         images: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPOSITORY }}/${{ env.UBUNTU_IMAGE_NAME }}
+        tags: |
+          type=schedule
+          type=ref,event=branch
+          type=ref,event=tag
+          type=ref,event=pr
+          type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
 
     - name: Create manifest list and push
       working-directory: /tmp/digests
