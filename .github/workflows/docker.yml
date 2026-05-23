@@ -35,10 +35,8 @@ jobs:
         include:
         - platform: linux/amd64
           arch: amd64
-        # arm64 temporarily disabled while shipping v1.3.2 hotfix; re-add once
-        # the amd64 image is published.
-        # - platform: linux/arm64
-        #   arch: arm64
+        - platform: linux/arm64
+          arch: arm64
     steps:
     - name: Prepare
       run: |
@@ -168,10 +166,8 @@ jobs:
         include:
         - platform: linux/amd64
           arch: amd64
-        # arm64 temporarily disabled while shipping v1.3.2 hotfix; re-add once
-        # the amd64 image is published.
-        # - platform: linux/arm64
-        #   arch: arm64
+        - platform: linux/arm64
+          arch: arm64
     steps:
     - name: Prepare
       run: |
