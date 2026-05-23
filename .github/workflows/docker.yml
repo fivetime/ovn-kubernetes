@@ -87,6 +87,12 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha,scope=fedora-${{ env.PLATFORM_PAIR }}
         cache-to: type=gha,mode=max,scope=fedora-${{ env.PLATFORM_PAIR }}
+        # Provenance/SBOM attestations create an extra manifest under the
+        # returned image-digest, which makes `docker buildx imagetools create`
+        # fail with "@sha256:... not found" in the merge step. Disable them
+        # so push-by-digest returns the actual image manifest digest.
+        provenance: false
+        sbom: false
         outputs: type=image,name=${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPOSITORY }}/${{ env.FEDORA_IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
 
     - name: Export digest
@@ -228,6 +234,9 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha,scope=ubuntu-${{ env.PLATFORM_PAIR }}
         cache-to: type=gha,mode=max,scope=ubuntu-${{ env.PLATFORM_PAIR }}
+        # See provenance: false comment in build-fedora above.
+        provenance: false
+        sbom: false
         outputs: type=image,name=${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPOSITORY }}/${{ env.UBUNTU_IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
 
     - name: Export digest
