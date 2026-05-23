@@ -28,15 +28,15 @@ jobs:
   # Build Fedora image for each platform
   build-fedora:
     name: Build Fedora (${{ matrix.platform }})
-    runs-on: ${{ matrix.runner }}
+    runs-on: self-hosted
     strategy:
       fail-fast: true
       matrix:
         include:
         - platform: linux/amd64
-          runner: ubuntu-latest
+          arch: amd64
         - platform: linux/arm64
-          runner: ubuntu-24.04-arm
+          arch: arm64
     steps:
     - name: Prepare
       run: |
@@ -104,7 +104,7 @@ jobs:
   # Merge Fedora multi-platform images
   merge-fedora:
     name: Merge Fedora
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build-fedora
     steps:
     - name: Download digests
@@ -149,15 +149,15 @@ jobs:
   # Build Ubuntu image for each platform
   build-ubuntu:
     name: Build Ubuntu (${{ matrix.platform }})
-    runs-on: ${{ matrix.runner }}
+    runs-on: self-hosted
     strategy:
       fail-fast: true
       matrix:
         include:
         - platform: linux/amd64
-          runner: ubuntu-latest
+          arch: amd64
         - platform: linux/arm64
-          runner: ubuntu-24.04-arm
+          arch: arm64
     steps:
     - name: Prepare
       run: |
@@ -189,7 +189,11 @@ jobs:
 
     # TODO: this is not hermetic; switch to in-docker build of binaries
     - name: Build ovnkube-binaries and stage image context
-      run: | 
+      env:
+        # build-go.sh uses CGO_ENABLED=0, so GOARCH alone cross-compiles
+        # cleanly without needing a C toolchain for the target arch.
+        GOARCH: ${{ matrix.arch }}
+      run: |
         make -C dist/images bld
 
     - name: Set up Docker Buildx
@@ -239,7 +243,7 @@ jobs:
   # Merge Ubuntu multi-platform images
   merge-ubuntu:
     name: Merge Ubuntu
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build-ubuntu
     steps:
     - name: Download digests
