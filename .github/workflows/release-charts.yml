@@ -1,0 +1,142 @@
+name: Release Helm Charts
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'helm/**'
+      - '!**.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  ensure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Create gh-pages branch if not exists
+        run: |
+          if ! git ls-remote --heads origin gh-pages | grep -q gh-pages; then
+            echo "Creating gh-pages branch..."
+            git checkout --orphan gh-pages
+            git rm -rf .
+            echo "# OVN-Kubernetes Helm Chart Repository" > README.md
+            git add README.md
+            git commit -m "Initialize gh-pages branch"
+            git push origin gh-pages
+          else
+            echo "gh-pages branch already exists"
+          fi
+
+  release:
+    needs: ensure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+
+      - name: Run chart-releaser
+        # charts_dir: helm scans only direct children -- helm/ovn-kubernetes
+        # and helm/sdn-dashboard. Subcharts under helm/ovn-kubernetes/charts/
+        # are NOT released separately; helm package bundles them into the
+        # umbrella chart's .tgz automatically.
+        uses: helm/chart-releaser-action@v1.6.0
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        with:
+          charts_dir: helm
+          skip_existing: true
+
+  deploy:
+    needs: release
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v6
+        with:
+          ref: gh-pages
+          path: gh-pages
+
+      - name: Generate landing page
+        run: |
+          repo_name="${GITHUB_REPOSITORY##*/}"
+          owner="${GITHUB_REPOSITORY_OWNER}"
+          cat > gh-pages/index.html <<HTML
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <title>OVN-Kubernetes Helm Charts</title>
+            <style>
+              body { font-family: system-ui, -apple-system, sans-serif; max-width: 760px; margin: 3em auto; padding: 0 1em; line-height: 1.6; color: #222; }
+              code { background: #f4f4f4; padding: .15em .4em; border-radius: .25em; font-size: .95em; }
+              pre { background: #f4f4f4; padding: 1em; border-radius: .4em; overflow-x: auto; }
+              h1 { border-bottom: 1px solid #eee; padding-bottom: .3em; }
+              a { color: #0366d6; }
+              .note { background: #fff8c5; border-left: 4px solid #f0c674; padding: .6em 1em; border-radius: .25em; }
+            </style>
+          </head>
+          <body>
+            <h1>OVN-Kubernetes Helm Charts</h1>
+            <p class="note">Unofficial mirror of the upstream
+              <a href="https://github.com/ovn-kubernetes/ovn-kubernetes">ovn-kubernetes</a>
+              Helm charts. Published here because upstream does not offer a hosted Helm repository.</p>
+
+            <h2>Usage</h2>
+            <pre><code>helm repo add ovn-kubernetes https://${owner}.github.io/${repo_name}
+          helm repo update
+          helm search repo ovn-kubernetes</code></pre>
+
+            <h2>Install</h2>
+            <pre><code>helm install ovn-kubernetes ovn-kubernetes/ovn-kubernetes \\
+            --namespace ovn-kubernetes --create-namespace \\
+            -f values-single-node-zone.yaml</code></pre>
+
+            <p>Chart index: <a href="index.yaml">index.yaml</a> &middot;
+               Source: <a href="https://github.com/${owner}/${repo_name}">github.com/${owner}/${repo_name}</a></p>
+          </body>
+          </html>
+          HTML
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: gh-pages
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
