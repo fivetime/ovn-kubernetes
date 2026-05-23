@@ -2,7 +2,7 @@ apiVersion: v2
 name: ovn-kubernetes
 description: Helm chart to deploy ovn-kubernetes cni
 type: application
-version: 1.3.0
+version: 1.3.1
 appVersion: "1.3.0"
 home: https://ovn-kubernetes.io/
 icon: https://www.ovn.org/images/ovn-logo.png
@@ -21,7 +21,7 @@ dependencies:
     tags:
       - ovnkube-control-plane
   - name: ovnkube-identity
-    version: 1.3.0
+    version: 1.3.1
     tags:
       - ovnkube-identity
   - name: ovnkube-node
