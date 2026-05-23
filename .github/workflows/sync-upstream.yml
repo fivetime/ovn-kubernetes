@@ -1,0 +1,77 @@
+name: Sync from upstream
+
+on:
+  schedule:
+    # Daily at 01:00 UTC. Any new upstream tags get pushed to origin and
+    # trigger docker.yml (which now listens on v* tags) to publish images.
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+
+# Avoid two runs racing on the push to origin.
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  UPSTREAM: https://github.com/ovn-kubernetes/ovn-kubernetes.git
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "$UPSTREAM"
+          git fetch upstream --tags --prune
+
+      - name: Sync master
+        run: |
+          # Fast-forward when possible; otherwise merge so fork-local commits
+          # (e.g. the docker.yml OWNER tweak) survive. Abort on conflict so a
+          # broken merge never lands on origin/master.
+          if git merge --ff-only upstream/master; then
+            echo "Fast-forwarded master."
+          else
+            echo "Fork master has diverged; merging upstream/master."
+            if ! git merge upstream/master --no-edit -m "Sync upstream master"; then
+              echo "::error::merge conflict on master -- resolve manually"
+              git merge --abort
+              exit 1
+            fi
+          fi
+          git push origin master
+
+      - name: Sync release-* branches
+        run: |
+          # release-* branches in the fork are expected to mirror upstream;
+          # we fast-forward only. A diverged branch is warned and skipped so
+          # one bad branch doesn't fail the whole sync.
+          for ref in $(git for-each-ref --format='%(refname:short)' refs/remotes/upstream/release-*); do
+            branch="${ref#upstream/}"
+            echo "::group::Sync ${branch}"
+            if git fetch upstream "${branch}:refs/heads/${branch}"; then
+              git push origin "${branch}" || echo "::warning::push failed for ${branch}"
+            else
+              echo "::warning::${branch} diverged from upstream -- skipped"
+            fi
+            echo "::endgroup::"
+          done
+
+      - name: Push tags
+        run: |
+          # Existing tags are not overwritten (no --force); only new upstream
+          # tags get pushed. Each new tag triggers docker.yml.
+          git push origin --tags
