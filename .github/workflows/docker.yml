@@ -97,15 +97,19 @@ jobs:
 
     - name: Export digest
       run: |
-        mkdir -p /tmp/digests
+        # Use runner.temp (auto-cleaned per job) instead of /tmp/digests,
+        # which on a long-lived self-hosted runner accumulates digests from
+        # every previous job and causes Merge to attempt tagging
+        # already-overwritten manifests.
+        mkdir -p "${RUNNER_TEMP}/digests"
         digest="${{ steps.build.outputs.digest }}"
-        touch "/tmp/digests/${digest#sha256:}"
+        touch "${RUNNER_TEMP}/digests/${digest#sha256:}"
 
     - name: Upload digest
       uses: actions/upload-artifact@v7
       with:
         name: digests-fedora-${{ env.PLATFORM_PAIR }}
-        path: /tmp/digests/*
+        path: ${{ runner.temp }}/digests/*
         if-no-files-found: error
         retention-days: 1
 
@@ -118,7 +122,7 @@ jobs:
     - name: Download digests
       uses: actions/download-artifact@v8
       with:
-        path: /tmp/digests
+        path: ${{ runner.temp }}/digests
         pattern: digests-fedora-*
         merge-multiple: true
 
@@ -145,7 +149,7 @@ jobs:
           type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
 
     - name: Create manifest list and push
-      working-directory: /tmp/digests
+      working-directory: ${{ runner.temp }}/digests
       run: |
         docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
           $(printf '${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPOSITORY }}/${{ env.FEDORA_IMAGE_NAME }}@sha256:%s ' *)
@@ -241,15 +245,16 @@ jobs:
 
     - name: Export digest
       run: |
-        mkdir -p /tmp/digests
+        # See comment on Fedora's Export digest above.
+        mkdir -p "${RUNNER_TEMP}/digests"
         digest="${{ steps.build.outputs.digest }}"
-        touch "/tmp/digests/${digest#sha256:}"
+        touch "${RUNNER_TEMP}/digests/${digest#sha256:}"
 
     - name: Upload digest
       uses: actions/upload-artifact@v7
       with:
         name: digests-ubuntu-${{ env.PLATFORM_PAIR }}
-        path: /tmp/digests/*
+        path: ${{ runner.temp }}/digests/*
         if-no-files-found: error
         retention-days: 1
 
@@ -262,7 +267,7 @@ jobs:
     - name: Download digests
       uses: actions/download-artifact@v8
       with:
-        path: /tmp/digests
+        path: ${{ runner.temp }}/digests
         pattern: digests-ubuntu-*
         merge-multiple: true
 
@@ -289,7 +294,7 @@ jobs:
           type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
 
     - name: Create manifest list and push
-      working-directory: /tmp/digests
+      working-directory: ${{ runner.temp }}/digests
       run: |
         docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
           $(printf '${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPOSITORY }}/${{ env.UBUNTU_IMAGE_NAME }}@sha256:%s ' *)
