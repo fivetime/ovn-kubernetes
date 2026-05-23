@@ -25,6 +25,10 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          # GITHUB_TOKEN cannot push commits/tags that touch workflow files,
+          # which upstream tags do (v1.0.0+ include .github/workflows/*).
+          # SYNC_PAT is a personal access token with the 'workflow' scope.
+          token: ${{ secrets.SYNC_PAT }}
 
       - name: Configure git identity
         run: |
