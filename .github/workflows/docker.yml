@@ -102,7 +102,10 @@ jobs:
 
   # Build Fedora image for each platform
   build-fedora:
-    name: Build Fedora (${{ matrix.platform }})
+    # Short-circuit name so a skipped job (empty matrix) doesn't render the
+    # literal "${{ matrix.platform }}" in the UI -- GitHub leaves matrix
+    # references uninterpolated when the matrix never expanded.
+    name: Build Fedora${{ matrix.platform && format(' ({0})', matrix.platform) || '' }}
     needs: discover
     if: needs.discover.outputs.build_fedora == 'true'
     runs-on: self-hosted
@@ -232,7 +235,8 @@ jobs:
 
   # Build Ubuntu image for each platform
   build-ubuntu:
-    name: Build Ubuntu (${{ matrix.platform }})
+    # See comment on build-fedora's name.
+    name: Build Ubuntu${{ matrix.platform && format(' ({0})', matrix.platform) || '' }}
     needs: discover
     if: needs.discover.outputs.build_ubuntu == 'true'
     runs-on: self-hosted
