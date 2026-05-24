@@ -48,9 +48,10 @@ jobs:
   discover:
     runs-on: ubuntu-latest
     outputs:
+      fedora_matrix: ${{ steps.gen.outputs.fedora_matrix }}
+      ubuntu_matrix: ${{ steps.gen.outputs.ubuntu_matrix }}
       build_fedora: ${{ steps.gen.outputs.build_fedora }}
       build_ubuntu: ${{ steps.gen.outputs.build_ubuntu }}
-      platform_matrix: ${{ steps.gen.outputs.platform_matrix }}
     steps:
       - id: gen
         run: |
@@ -75,10 +76,18 @@ jobs:
             arm64) pm='[{"platform":"linux/arm64","arch":"arm64"}]' ;;
           esac
 
+          # Empty matrix when image isn't selected; GitHub Actions then skips
+          # the job *invisibly* (no "skipped" row in the UI, no literal
+          # `${{ matrix.X }}` shown). Job-level `if:` makes the job appear
+          # as skipped with the unevaluated name -- empty matrix doesn't.
+          [[ "$bf" == true ]] && fm="$pm" || fm='[]'
+          [[ "$bu" == true ]] && um="$pm" || um='[]'
+
           {
+            echo "fedora_matrix=$fm"
+            echo "ubuntu_matrix=$um"
             echo "build_fedora=$bf"
             echo "build_ubuntu=$bu"
-            echo "platform_matrix=$pm"
           } >> "$GITHUB_OUTPUT"
 
           {
@@ -96,23 +105,20 @@ jobs:
             echo "| build_ubuntu | ${bu} |"
             echo ""
             echo '```json'
-            echo "$pm"
+            echo "fedora_matrix=$fm"
+            echo "ubuntu_matrix=$um"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Build Fedora image for each platform
   build-fedora:
-    # Short-circuit name so a skipped job (empty matrix) doesn't render the
-    # literal "${{ matrix.platform }}" in the UI -- GitHub leaves matrix
-    # references uninterpolated when the matrix never expanded.
-    name: Build Fedora${{ matrix.platform && format(' ({0})', matrix.platform) || '' }}
+    name: Build Fedora (${{ matrix.platform }})
     needs: discover
-    if: needs.discover.outputs.build_fedora == 'true'
     runs-on: self-hosted
     strategy:
       fail-fast: true
       matrix:
-        include: ${{ fromJson(needs.discover.outputs.platform_matrix) }}
+        include: ${{ fromJson(needs.discover.outputs.fedora_matrix) }}
     steps:
     - name: Prepare
       run: |
@@ -235,15 +241,13 @@ jobs:
 
   # Build Ubuntu image for each platform
   build-ubuntu:
-    # See comment on build-fedora's name.
-    name: Build Ubuntu${{ matrix.platform && format(' ({0})', matrix.platform) || '' }}
+    name: Build Ubuntu (${{ matrix.platform }})
     needs: discover
-    if: needs.discover.outputs.build_ubuntu == 'true'
     runs-on: self-hosted
     strategy:
       fail-fast: true
       matrix:
-        include: ${{ fromJson(needs.discover.outputs.platform_matrix) }}
+        include: ${{ fromJson(needs.discover.outputs.ubuntu_matrix) }}
     steps:
     - name: Prepare
       run: |
