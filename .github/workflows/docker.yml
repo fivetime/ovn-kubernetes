@@ -28,6 +28,9 @@ jobs:
   # Build Fedora image for each platform
   build-fedora:
     name: Build Fedora (${{ matrix.platform }})
+    # TEMP: skip Fedora for v1.3.3 prod validation; Ubuntu-only test image.
+    # Re-enable after Simon's cluster confirms encap/nexthop changes work.
+    if: false
     runs-on: self-hosted
     strategy:
       fail-fast: true
@@ -166,8 +169,9 @@ jobs:
         include:
         - platform: linux/amd64
           arch: amd64
-        - platform: linux/arm64
-          arch: arm64
+        # TEMP: arm64 disabled for v1.3.3 prod validation; restore after.
+        # - platform: linux/arm64
+        #   arch: arm64
     steps:
     - name: Prepare
       run: |
