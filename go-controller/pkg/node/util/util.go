@@ -16,22 +16,37 @@ import (
 
 // GetNetworkInterfaceIPAddresses returns the IP addresses for the network interface 'iface'.
 //
-// If iface turns out to be an OVS port on a bridge -- which is what happens
-// once OVS has taken over a physical gateway interface in shared/local mode
-// (the host IP migrates from the slave port to the bridge's internal port) --
-// translate to the bridge name first. Every caller of this function wants
-// "the IPs the host has on this gateway path", which after takeover live on
-// the bridge, not on the slave port. Doing the translation here covers all
-// 6 callers (gateway_init.go, gateway_shared_intf.go, bridgeconfig.go) at
-// once and matches the translation that initGatewayPreStart already does
-// for `config.Gateway.Interface` in gateway_init.go:84-90.
+// In shared / local gateway mode OVS takes over the user-configured gateway
+// interface and the host IP migrates to the bridge's internal port. Every
+// caller of this function wants "the IPs the host has on this gateway
+// path", which after takeover live on the bridge, not on the slave port.
+// Translate iface to the bridge name before looking up IPs:
 //
-// `port-to-br` returns an error when iface is not an OVS port (e.g. a plain
-// Linux netdev like the kubernetes node interface), in which case we keep
-// the original iface -- preserving the historical behaviour.
+//   1. port-to-br <iface>            — covers the normal "OVS has the port
+//                                       attached right now" state.
+//   2. fall back to GetBridgeName     — covers a transient state where OVN-K
+//      (= "br" + iface, see           cleanup has detached the port but the
+//      pkg/util/nicstobridge.go:25)   bridge survived with the host IP still
+//      and `br-exists` check          on its internal port. Without this
+//                                     fallback, init paths (gateway_init.go
+//                                     :424) crash because the slave port has
+//                                     no IP and the bridge isn't found via
+//                                     port-to-br.
+//   3. neither found                 — keep iface as-is (covers the initial
+//                                       boot state before OVS takes over, and
+//                                       legitimate non-OVS callers like the
+//                                       DPU-host kubernetes node interface).
+//
+// Doing the translation here covers all 6 callers (gateway_init.go,
+// gateway_shared_intf.go, bridgeconfig.go) at once, mirroring the existing
+// translation in initGatewayPreStart (gateway_init.go:84-90).
 func GetNetworkInterfaceIPAddresses(iface string) ([]*net.IPNet, error) {
 	if bridgeName, _, err := pkgutil.RunOVSVsctl("port-to-br", iface); err == nil && bridgeName != "" {
 		iface = bridgeName
+	} else if bridgeName := pkgutil.GetBridgeName(iface); bridgeName != "" {
+		if _, _, err := pkgutil.RunOVSVsctl("br-exists", bridgeName); err == nil {
+			iface = bridgeName
+		}
 	}
 	allIPs, err := pkgutil.GetFilteredInterfaceV4V6IPs(iface)
 	if err != nil {
