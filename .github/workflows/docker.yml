@@ -338,7 +338,8 @@ jobs:
   merge-ubuntu:
     name: Merge Ubuntu
     needs: [discover, build-ubuntu]
-    if: needs.discover.outputs.build_ubuntu == 'true' && needs.build-ubuntu.result == 'success'
+    # See comment on merge-fedora's `if:`.
+    if: needs.discover.outputs.build_ubuntu == 'true'
     runs-on: self-hosted
     steps:
     - name: Download digests
