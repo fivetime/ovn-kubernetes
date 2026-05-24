@@ -197,7 +197,8 @@ jobs:
   merge-fedora:
     name: Merge Fedora
     needs: [discover, build-fedora]
-    if: needs.discover.outputs.build_fedora == 'true' && needs.build-fedora.result == 'success'
+    # See comment on merge-ubuntu's `if:` (added in the previous commit).
+    if: needs.discover.outputs.build_fedora == 'true'
     runs-on: self-hosted
     steps:
     - name: Download digests
