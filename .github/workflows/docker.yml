@@ -10,8 +10,26 @@ on:
     # file at the tag commit, which predates this repo's docker.yml tweaks.
     inputs:
       tag:
-        description: 'Git tag/ref to build and tag the image with (e.g. v1.3.0)'
-        required: true
+        description: 'Git tag/ref to check out + image tag (e.g. v1.3.3). Empty = use the dispatched branch ref.'
+        required: false
+        default: ''
+      images:
+        description: 'Which images to build'
+        required: false
+        default: both
+        type: choice
+        options: [both, fedora, ubuntu]
+      platforms:
+        description: 'Which platforms to build'
+        required: false
+        default: both
+        type: choice
+        options: [both, amd64, arm64]
+      dry_run:
+        description: 'Print discovered matrix and exit (no builds)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -25,21 +43,73 @@ env:
   UBUNTU_IMAGE_NAME: ovn-kube-ubuntu
   BUILDER_IMAGE: quay.io/projectquay/golang:1.25
 jobs:
+  # Resolve which images / platforms to build. Push events build everything;
+  # workflow_dispatch can scope down via inputs.
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      build_fedora: ${{ steps.gen.outputs.build_fedora }}
+      build_ubuntu: ${{ steps.gen.outputs.build_ubuntu }}
+      platform_matrix: ${{ steps.gen.outputs.platform_matrix }}
+    steps:
+      - id: gen
+        run: |
+          set -euo pipefail
+          images="${{ inputs.images }}"
+          platforms="${{ inputs.platforms }}"
+          dry="${{ inputs.dry_run }}"
+          # Push events leave inputs.* empty -> default to building everything.
+          [[ -z "$images"    ]] && images=both
+          [[ -z "$platforms" ]] && platforms=both
+
+          if [[ "$dry" == "true" ]]; then
+            bf=false; bu=false
+          else
+            [[ "$images" == both || "$images" == fedora ]] && bf=true || bf=false
+            [[ "$images" == both || "$images" == ubuntu ]] && bu=true || bu=false
+          fi
+
+          case "$platforms" in
+            both)  pm='[{"platform":"linux/amd64","arch":"amd64"},{"platform":"linux/arm64","arch":"arm64"}]' ;;
+            amd64) pm='[{"platform":"linux/amd64","arch":"amd64"}]' ;;
+            arm64) pm='[{"platform":"linux/arm64","arch":"arm64"}]' ;;
+          esac
+
+          {
+            echo "build_fedora=$bf"
+            echo "build_ubuntu=$bu"
+            echo "platform_matrix=$pm"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Discovered build plan"
+            echo ""
+            echo "| key | value |"
+            echo "|---|---|"
+            echo "| event | ${{ github.event_name }} |"
+            echo "| ref | ${{ github.ref }} |"
+            echo "| inputs.tag | ${{ inputs.tag }} |"
+            echo "| images | ${images} |"
+            echo "| platforms | ${platforms} |"
+            echo "| dry_run | ${dry} |"
+            echo "| build_fedora | ${bf} |"
+            echo "| build_ubuntu | ${bu} |"
+            echo ""
+            echo '```json'
+            echo "$pm"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # Build Fedora image for each platform
   build-fedora:
     name: Build Fedora (${{ matrix.platform }})
-    # TEMP: skip Fedora for v1.3.3 prod validation; Ubuntu-only test image.
-    # Re-enable after Simon's cluster confirms encap/nexthop changes work.
-    if: false
+    needs: discover
+    if: needs.discover.outputs.build_fedora == 'true'
     runs-on: self-hosted
     strategy:
       fail-fast: true
       matrix:
-        include:
-        - platform: linux/amd64
-          arch: amd64
-        - platform: linux/arm64
-          arch: arm64
+        include: ${{ fromJson(needs.discover.outputs.platform_matrix) }}
     steps:
     - name: Prepare
       run: |
@@ -117,8 +187,9 @@ jobs:
   # Merge Fedora multi-platform images
   merge-fedora:
     name: Merge Fedora
+    needs: [discover, build-fedora]
+    if: needs.discover.outputs.build_fedora == 'true' && needs.build-fedora.result == 'success'
     runs-on: self-hosted
-    needs: build-fedora
     steps:
     - name: Download digests
       uses: actions/download-artifact@v8
@@ -162,16 +233,13 @@ jobs:
   # Build Ubuntu image for each platform
   build-ubuntu:
     name: Build Ubuntu (${{ matrix.platform }})
+    needs: discover
+    if: needs.discover.outputs.build_ubuntu == 'true'
     runs-on: self-hosted
     strategy:
       fail-fast: true
       matrix:
-        include:
-        - platform: linux/amd64
-          arch: amd64
-        # TEMP: arm64 disabled for v1.3.3 prod validation; restore after.
-        # - platform: linux/arm64
-        #   arch: arm64
+        include: ${{ fromJson(needs.discover.outputs.platform_matrix) }}
     steps:
     - name: Prepare
       run: |
@@ -261,8 +329,9 @@ jobs:
   # Merge Ubuntu multi-platform images
   merge-ubuntu:
     name: Merge Ubuntu
+    needs: [discover, build-ubuntu]
+    if: needs.discover.outputs.build_ubuntu == 'true' && needs.build-ubuntu.result == 'success'
     runs-on: self-hosted
-    needs: build-ubuntu
     steps:
     - name: Download digests
       uses: actions/download-artifact@v8
