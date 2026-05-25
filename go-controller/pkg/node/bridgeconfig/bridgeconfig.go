@@ -166,19 +166,12 @@ func NewBridgeConfiguration(ovsClient libovsdbclient.Client, intfName, nodeName,
 		res.gwIface = gwIntf
 		res.macAddress = link.Attrs().HardwareAddr
 	} else if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
-		// This is an OVS bridge's internal port. On first node-join
-		// NicToBridge migrated the user's IPs/routes from intfName to
-		// the bridge, but OVS conf.db persists the bridge structure
-		// across reboot while the host netd (e.g. systemd-networkd
-		// re-applying a netplan vlans.<iface>.addresses block) re-adds
-		// the IPs to the kernel slave port. We then land here with a
-		// bare bridge and the next GetNetworkInterfaceIPAddresses
-		// call would crash gateway init. Re-run the port→bridge IP
-		// migration to restore steady state; no-op when the bridge
-		// already owns IPs.
-		if err := util.EnsureBridgeOwnsPortAddrs(intfName, bridgeName); err != nil {
-			return nil, fmt.Errorf("failed to migrate addresses from port %s to bridge %s: %w", intfName, bridgeName, err)
-		}
+		// This is an OVS bridge's internal port.
+		// Note: the IP/route re-migration that restores OVN-K's
+		// steady-state invariant across reboot now lives centrally
+		// in nodeutil.GetNetworkInterfaceIPAddresses, which is called
+		// downstream on every gateway-IP read path. No explicit
+		// EnsureBridgeOwnsPortAddrs needed here.
 		uplinkName, err := util.GetNicName(bridgeName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to find nic name for bridge %s: %w", bridgeName, err)

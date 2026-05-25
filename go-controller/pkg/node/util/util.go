@@ -40,13 +40,31 @@ import (
 // Doing the translation here covers all 6 callers (gateway_init.go,
 // gateway_shared_intf.go, bridgeconfig.go) at once, mirroring the existing
 // translation in initGatewayPreStart (gateway_init.go:84-90).
+//
+// In addition to the lookup remap, the helper restores the OVN-K
+// steady-state invariant that the bridge owns the IPs: if the host netd
+// (e.g. systemd-networkd re-applying a netplan vlans.<iface>.addresses
+// block on reboot) put the IPs back on the kernel slave port, we
+// re-migrate them from the port to the bridge before reading. Without
+// this, any caller whose code path runs before initGateway's per-iface
+// reconciliation would see a bare bridge and fatally exit with
+// "failed to find IPv4 address on interface <bridge>". The migration
+// is no-op when the bridge already has IPs.
 func GetNetworkInterfaceIPAddresses(iface string) ([]*net.IPNet, error) {
-	if bridgeName, _, err := pkgutil.RunOVSVsctl("port-to-br", iface); err == nil && bridgeName != "" {
-		iface = bridgeName
-	} else if bridgeName := pkgutil.GetBridgeName(iface); bridgeName != "" {
-		if _, _, err := pkgutil.RunOVSVsctl("br-exists", bridgeName); err == nil {
-			iface = bridgeName
+	port := iface
+	var bridgeName string
+	if br, _, err := pkgutil.RunOVSVsctl("port-to-br", iface); err == nil && br != "" {
+		bridgeName = br
+	} else if br := pkgutil.GetBridgeName(iface); br != "" {
+		if _, _, err := pkgutil.RunOVSVsctl("br-exists", br); err == nil {
+			bridgeName = br
 		}
+	}
+	if bridgeName != "" {
+		if err := pkgutil.EnsureBridgeOwnsPortAddrs(port, bridgeName); err != nil {
+			return nil, fmt.Errorf("failed to migrate addresses from port %s to bridge %s: %w", port, bridgeName, err)
+		}
+		iface = bridgeName
 	}
 	allIPs, err := pkgutil.GetFilteredInterfaceV4V6IPs(iface)
 	if err != nil {
