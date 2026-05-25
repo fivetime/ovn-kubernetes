@@ -4,6 +4,69 @@ entries:
   - annotations:
       default-values: values-single-node-zone.yaml
     apiVersion: v2
+    appVersion: 1.3.13
+    created: "2026-05-25T19:16:00.836612587Z"
+    dependencies:
+    - name: ovn-ipsec
+      repository: ""
+      tags:
+      - ovn-ipsec
+      version: 1.3.0
+    - name: ovnkube-control-plane
+      repository: ""
+      tags:
+      - ovnkube-control-plane
+      version: 1.3.0
+    - name: ovnkube-identity
+      repository: ""
+      tags:
+      - ovnkube-identity
+      version: 1.3.1
+    - name: ovnkube-node
+      repository: ""
+      tags:
+      - ovnkube-node
+      version: 1.3.4
+    - name: ovnkube-node-dpu
+      repository: ""
+      tags:
+      - ovnkube-node-dpu
+      version: 1.3.4
+    - name: ovnkube-node-dpu-host
+      repository: ""
+      tags:
+      - ovnkube-node-dpu-host
+      version: 1.3.4
+    - name: ovnkube-single-node-zone
+      repository: ""
+      tags:
+      - ovnkube-single-node-zone
+      version: 1.3.5
+    - name: ovs-node
+      repository: ""
+      tags:
+      - ovs-node
+      version: 1.3.0
+    - name: ovnkube-single-node-zone-dpu
+      repository: ""
+      tags:
+      - ovnkube-single-node-zone-dpu
+      version: 1.3.5
+    description: Helm chart to deploy ovn-kubernetes cni
+    digest: 2ca3686701d63a7f9ff1708d44fb9258d70668712da571beb483577f79d7d579
+    home: https://ovn-kubernetes.io/
+    icon: https://www.ovn.org/images/ovn-logo.png
+    name: ovn-kubernetes
+    sources:
+    - https://github.com/ovn-kubernetes/ovn-kubernetes
+    - https://github.com/ovn-org/ovn
+    type: application
+    urls:
+    - https://github.com/fivetime/ovn-kubernetes/releases/download/ovn-kubernetes-1.3.13/ovn-kubernetes-1.3.13.tgz
+    version: 1.3.13
+  - annotations:
+      default-values: values-single-node-zone.yaml
+    apiVersion: v2
     appVersion: 1.3.11
     created: "2026-05-25T19:12:49.967577506Z"
     dependencies:
@@ -770,4 +833,4 @@ entries:
     urls:
     - https://github.com/fivetime/ovn-kubernetes/releases/download/sdn-dashboard-1.3.0/sdn-dashboard-1.3.0.tgz
     version: 1.3.0
-generated: "2026-05-25T19:12:49.967646074Z"
+generated: "2026-05-25T19:16:00.836689941Z"
