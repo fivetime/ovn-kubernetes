@@ -2026,6 +2026,44 @@ var _ = Describe("Gateway unit tests", func() {
 			Expect(gatewayNextHops[0]).To(Equal(gwIP))
 		})
 
+		It("Skips link-local via routes (e.g. OVN-K service masquerade) when resolving --gateway-nexthop=self", func() {
+			ifName := "brovn-ext"
+			rackGw := net.ParseIP("10.128.0.1")
+			masqGw := net.ParseIP("169.254.0.4")
+			lnk := &linkMock.Link{}
+			lnkAttr := &netlink.LinkAttrs{Name: ifName, Index: 5}
+			_, rackDst, err := net.ParseCIDR("10.128.0.0/11")
+			Expect(err).ToNot(HaveOccurred())
+			_, masqDst, err := net.ParseCIDR("254.52.0.0/16")
+			Expect(err).ToNot(HaveOccurred())
+			// Masquerade route listed FIRST to reproduce the production
+			// bug where RouteList ordering put it ahead of the rack route.
+			routes := []netlink.Route{
+				{Dst: masqDst, LinkIndex: 5, Gw: masqGw},
+				{Dst: rackDst, LinkIndex: 5, Gw: rackGw},
+			}
+			lnk.On("Attrs").Return(lnkAttr)
+			netlinkMock.On("LinkByName", ifName).Return(lnk, nil)
+			netlinkMock.On("RouteList", lnk, netlink.FAMILY_V4).Return(routes, nil)
+
+			fexec := ovntest.NewLooseCompareFakeExec()
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 port-to-br %s", ifName),
+				Err: fmt.Errorf(""),
+			})
+			Expect(util.SetExec(fexec)).To(Succeed())
+
+			config.IPv4Mode = true
+			config.IPv6Mode = false
+			config.Gateway.Interface = ifName
+			config.Gateway.NextHop = "self"
+
+			gatewayNextHops, _, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gatewayNextHops).To(HaveLen(1))
+			Expect(gatewayNextHops[0]).To(Equal(rackGw))
+		})
+
 		It("Accepts --gateway-nexthop=SELF case-insensitively", func() {
 			ifName := "enf1f0"
 			gwIP := net.ParseIP("10.0.0.11")
