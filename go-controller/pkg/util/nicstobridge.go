@@ -231,6 +231,20 @@ func NicToBridge(iface string) (string, error) {
 	}
 
 	bridge := GetBridgeName(iface)
+	// Do NOT tag the uplink port as transient. Pairing transient=true
+	// with --delete-transient-ports in dist/images/ovnkube.sh's ovs-server
+	// startup deletes the uplink Port row from conf.db on every ovs-node
+	// container restart (image pull, helm upgrade, OOM, etc.). The kernel
+	// netdev (e.g. ovn-ext) is then unenslaved from the bridge and
+	// ovnkube-controller's gateway init reads no IPv4 on the (now bare)
+	// bridge during getNodePrimaryIfAddrs / getGatewayNextHops, fatally
+	// exiting before bridgeconfig.NewBridgeConfiguration's NicToBridge
+	// rewire path has a chance to re-attach the port.
+	//
+	// The original "scrub stale ports on hard reboot" intent transient=true
+	// provided does not translate to containerized OVS, mirroring the same
+	// reasoning that PR #6459 used to remove the marker from the pod-veth
+	// add-port site in pkg/cni/helper_linux.go.
 	ovsArgs := []string{
 		"--", "--may-exist", "add-br", bridge,
 		"--", "br-set-external-id", bridge, "bridge-id", bridge,
@@ -238,7 +252,6 @@ func NicToBridge(iface string) (string, error) {
 		"--", "set", "bridge", bridge, "fail-mode=standalone",
 		fmt.Sprintf("other_config:hwaddr=%s", ifaceLink.Attrs().HardwareAddr),
 		"--", "--may-exist", "add-port", bridge, iface,
-		"--", "set", "port", iface, "other-config:transient=true",
 	}
 	stdout, stderr, err := RunOVSVsctl(ovsArgs...)
 	if err != nil {
