@@ -224,6 +224,90 @@ func setupDefaultFile() {
 
 // NicToBridge creates a OVS bridge for the 'iface' and also moves the IP
 // address and routes of 'iface' to OVS bridge.
+// EnsureBridgeOwnsPortAddrs restores OVN-K's steady-state invariant that
+// the OVS gateway bridge — not the host kernel slave port — carries the
+// IP addresses and routes. Call this after detecting that an existing OVS
+// bridge owns portName via `ovs-vsctl port-to-br`, before reading the
+// bridge's IPs.
+//
+// The host netd (e.g. systemd-networkd applying netplan with the
+// `vlans.<iface>.addresses` model) re-applies the configured IP to the
+// kernel slave port on every boot. NicToBridge migrates that IP to the
+// OVS bridge on first node-join, but OVS conf.db persists the bridge
+// structure across reboots while the kernel-side migration has to be
+// redone every boot. This function detects the bare-bridge state and
+// re-runs the IP/route migration without recreating the bridge.
+//
+// No-op when the bridge already has any global-unicast IP (steady state)
+// or when the port has no global-unicast IP to migrate (host netd not
+// yet applied / DHCP pending). Unlike NicToBridge, this function does
+// not create the bridge or attach the port; both must already exist
+// (caller has verified via port-to-br).
+//
+// Bridge IPs are evaluated through IsGlobalUnicast(), which means
+// link-local addresses OVN-K itself plumbs on the bridge (e.g. the
+// 169.254/16 host masquerade) do not satisfy the "bridge already owns
+// IPs" check — same filter used by resolveNextHopSelf, keeping
+// repo-wide semantics consistent.
+func EnsureBridgeOwnsPortAddrs(portName, bridgeName string) error {
+	bridgeLink, err := netLinkOps.LinkByName(bridgeName)
+	if err != nil {
+		return fmt.Errorf("failed to look up bridge %q: %w", bridgeName, err)
+	}
+	bridgeAddrs, err := netLinkOps.AddrList(bridgeLink, syscall.AF_UNSPEC)
+	if err != nil {
+		return fmt.Errorf("failed to list addresses on bridge %q: %w", bridgeName, err)
+	}
+	for _, a := range bridgeAddrs {
+		if a.IP.IsGlobalUnicast() {
+			// steady state — bridge already owns at least one routable IP
+			return nil
+		}
+	}
+
+	portLink, err := netLinkOps.LinkByName(portName)
+	if err != nil {
+		return fmt.Errorf("failed to look up port %q: %w", portName, err)
+	}
+	portAddrs, err := netLinkOps.AddrList(portLink, syscall.AF_UNSPEC)
+	if err != nil {
+		return fmt.Errorf("failed to list addresses on port %q: %w", portName, err)
+	}
+	var portHasGlobalUnicast bool
+	for _, a := range portAddrs {
+		if a.IP.IsGlobalUnicast() {
+			portHasGlobalUnicast = true
+			break
+		}
+	}
+	if !portHasGlobalUnicast {
+		// Nothing to migrate. Stay silent on the return path so that the
+		// downstream "no IPv4 address on interface <bridge>" error from
+		// gateway init retains its more precise context; a warning here
+		// leaves a breadcrumb that the helper ran without surprises.
+		klog.Warningf("Bridge %q has no global-unicast IP and port %q has none to migrate; "+
+			"skipping address re-migration. Downstream gateway init will surface the missing-IP error.",
+			bridgeName, portName)
+		return nil
+	}
+
+	portRoutes, err := netLinkOps.RouteList(portLink, syscall.AF_UNSPEC)
+	if err != nil {
+		return fmt.Errorf("failed to list routes on port %q: %w", portName, err)
+	}
+
+	klog.Infof("Bridge %q has no global-unicast IP; re-migrating addresses and routes from port %q "+
+		"(typically triggered by host netd re-applying interface config across reboot)",
+		bridgeName, portName)
+	if err := saveIPAddress(portLink, bridgeLink, portAddrs); err != nil {
+		return fmt.Errorf("failed to migrate IP addresses from port %q to bridge %q: %w", portName, bridgeName, err)
+	}
+	if err := saveRoute(portLink, bridgeLink, portRoutes); err != nil {
+		return fmt.Errorf("failed to migrate routes from port %q to bridge %q: %w", portName, bridgeName, err)
+	}
+	return nil
+}
+
 func NicToBridge(iface string) (string, error) {
 	ifaceLink, err := netLinkOps.LinkByName(iface)
 	if err != nil {

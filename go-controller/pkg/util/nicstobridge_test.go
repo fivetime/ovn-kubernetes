@@ -1170,3 +1170,127 @@ func TestBridgeToNic(t *testing.T) {
 		})
 	}
 }
+
+func TestEnsureBridgeOwnsPortAddrs(t *testing.T) {
+	mockNetLinkOps := new(mocks.NetLinkOps)
+	mockBridgeLink := new(netlink_mocks.Link)
+	mockPortLink := new(netlink_mocks.Link)
+	netLinkOps = mockNetLinkOps
+
+	v4GU := netlink.Addr{IPNet: ovntest.MustParseIPNet("10.128.32.162/27")}
+	v6GU := netlink.Addr{IPNet: ovntest.MustParseIPNet("fc00:4:3:6::162/64")}
+	v4LinkLocal := netlink.Addr{IPNet: ovntest.MustParseIPNet("169.254.0.4/16")}
+
+	tests := []struct {
+		desc                     string
+		errExp                   bool
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
+		onRetArgsLinkIfaceOpers  []ovntest.TestifyMockHelper
+	}{
+		{
+			desc: "no-op when bridge already has a global-unicast IPv4",
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockBridgeLink, nil}},
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{v4GU}, nil}},
+			},
+		},
+		{
+			desc: "treats link-local-only bridge as empty and migrates from port",
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				// Bridge: only link-local → fails IsGlobalUnicast → fall through
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockBridgeLink, nil}},
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{v4LinkLocal}, nil}},
+				// Port: has v4 GU
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockPortLink, nil}},
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{v4GU}, nil}},
+				// RouteList for port routes
+				{OnCallMethodName: "RouteList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Route{}, nil}},
+				// saveIPAddress: AddrDel + AddrAdd + LinkSetUp
+				{OnCallMethodName: "AddrDel", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
+				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
+				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				// saveIPAddress reads newLink.Attrs().Name to set Addr.Label
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "brovn-ext"}}},
+			},
+		},
+		{
+			desc: "migrates v4 from port to empty bridge",
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockBridgeLink, nil}},
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{}, nil}},
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockPortLink, nil}},
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{v4GU}, nil}},
+				{OnCallMethodName: "RouteList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Route{}, nil}},
+				{OnCallMethodName: "AddrDel", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
+				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
+				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "brovn-ext"}}},
+			},
+		},
+		{
+			desc: "dual-stack: migrates v4 + v6 from port to empty bridge",
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockBridgeLink, nil}},
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{}, nil}},
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockPortLink, nil}},
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{v4GU, v6GU}, nil}},
+				{OnCallMethodName: "RouteList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Route{}, nil}},
+				// saveIPAddress iterates: v4 first
+				{OnCallMethodName: "AddrDel", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
+				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
+				// then v6
+				{OnCallMethodName: "AddrDel", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
+				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
+				// then LinkSetUp once at the end
+				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				// Attrs called once per migrated addr (for Label set)
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "brovn-ext"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "brovn-ext"}}},
+			},
+		},
+		{
+			desc: "no-op + warning when bridge and port are both bare",
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockBridgeLink, nil}},
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{}, nil}},
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockPortLink, nil}},
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Addr{}, nil}},
+				// no RouteList, no AddrDel/Add — returns early with warning
+			},
+		},
+		{
+			desc:   "propagates bridge LinkByName error",
+			errExp: true,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
+			},
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+			ovntest.ProcessMockFnList(&mockBridgeLink.Mock, tc.onRetArgsLinkIfaceOpers)
+
+			err := EnsureBridgeOwnsPortAddrs("ovn-ext", "brovn-ext")
+			t.Log(err)
+			if tc.errExp {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			mockNetLinkOps.AssertExpectations(t)
+			mockBridgeLink.AssertExpectations(t)
+			mockBridgeLink.ExpectedCalls = nil
+			mockBridgeLink.Calls = nil
+			mockPortLink.ExpectedCalls = nil
+			mockPortLink.Calls = nil
+		})
+	}
+}
