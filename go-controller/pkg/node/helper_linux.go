@@ -200,3 +200,47 @@ func multipathRouteMatchesIfIndex(r netlink.Route, ifIdx int) bool {
 	}
 	return true
 }
+
+// resolveNextHopSelf returns the first non-link-local `via` next-hop on
+// iface for the given address family. Unlike getDefaultGatewayInterfaceByFamily,
+// it accepts any prefix — not just the default route — so multi-rack setups
+// whose gateway interface only carries a rack-scoped /11 route can still
+// derive a usable next-hop.
+//
+// Returns (nil, nil) when the interface has no via route in the requested family;
+// the caller decides whether that is a hard error.
+func resolveNextHopSelf(iface string, family int) (net.IP, error) {
+	link, err := util.GetNetLinkOps().LinkByName(iface)
+	if err != nil {
+		return nil, fmt.Errorf("looking up %q: %w", iface, err)
+	}
+	routes, err := util.GetNetLinkOps().RouteList(link, family)
+	if err != nil {
+		return nil, fmt.Errorf("listing routes on %q: %w", iface, err)
+	}
+	for _, r := range routes {
+		if r.Gw != nil && !r.Gw.IsUnspecified() {
+			return r.Gw, nil
+		}
+		for _, nh := range r.MultiPath {
+			if nh.Gw != nil && !nh.Gw.IsUnspecified() {
+				return nh.Gw, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
+// resolveNextHopDefault returns the gateway IP of the system default route
+// (0.0.0.0/0 or ::/0) regardless of which interface it lives on. Returns
+// (nil, nil) when no default route exists in the requested family.
+func resolveNextHopDefault(family int) (net.IP, error) {
+	_, gw, err := getDefaultGatewayInterfaceByFamily(family, "")
+	if err != nil {
+		return nil, err
+	}
+	if len(gw) == 0 {
+		return nil, nil
+	}
+	return gw, nil
+}
