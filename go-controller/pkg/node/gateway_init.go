@@ -49,17 +49,7 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 	gatewayIntf := config.Gateway.Interface
 	if gatewayIntf != "" && (config.IsModeDPU() || config.IsModeFull()) {
 		if bridgeName, _, err := util.RunOVSVsctl("port-to-br", gatewayIntf); err == nil {
-			// This is an OVS bridge's internal port. getGatewayNextHops
-			// runs before bridgeconfig.NewBridgeConfiguration, so we
-			// re-migrate IPs/routes here too — otherwise resolveNextHopSelf
-			// (and downstream getDefaultGatewayInterfaceDetails) would see
-			// a bare bridge when the host netd put the IPs back on the
-			// kernel slave port across reboot. No-op when the bridge
-			// already owns the IPs (steady state); idempotent with the
-			// later call in bridgeconfig.NewBridgeConfiguration.
-			if err := util.EnsureBridgeOwnsPortAddrs(gatewayIntf, bridgeName); err != nil {
-				return nil, "", fmt.Errorf("failed to migrate addresses from port %s to bridge %s: %w", gatewayIntf, bridgeName, err)
-			}
+			// This is an OVS bridge's internal port
 			gatewayIntf = bridgeName
 		}
 	}

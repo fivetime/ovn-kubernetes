@@ -166,12 +166,7 @@ func NewBridgeConfiguration(ovsClient libovsdbclient.Client, intfName, nodeName,
 		res.gwIface = gwIntf
 		res.macAddress = link.Attrs().HardwareAddr
 	} else if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
-		// This is an OVS bridge's internal port.
-		// Note: the IP/route re-migration that restores OVN-K's
-		// steady-state invariant across reboot now lives centrally
-		// in nodeutil.GetNetworkInterfaceIPAddresses, which is called
-		// downstream on every gateway-IP read path. No explicit
-		// EnsureBridgeOwnsPortAddrs needed here.
+		// This is an OVS bridge's internal port
 		uplinkName, err := util.GetNicName(bridgeName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to find nic name for bridge %s: %w", bridgeName, err)
