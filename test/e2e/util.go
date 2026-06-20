@@ -57,8 +57,6 @@ const (
 	ovnGatewayMTUSupport = "k8s.ovn.org/gateway-mtu-support"
 )
 
-var singleNodePerZoneResult *bool
-
 type IpNeighbor struct {
 	Dst    string `json:"dst"`
 	Lladdr string `json:"lladdr"`
@@ -381,8 +379,8 @@ func pokeEndpointViaNode(nodeName, protocol, targetHost string, localPort, targe
 
 // wrapper logic around pokeEndpoint
 // contact the ExternalIP service until each endpoint returns its hostname and return true, or false otherwise
-func pokeExternalIpService(externalContainer infraapi.ExternalContainer, protocol, externalAddress string, externalPort int32, maxTries int, nodesHostnames sets.String) bool {
-	responses := sets.NewString()
+func pokeExternalIpService(externalContainer infraapi.ExternalContainer, protocol, externalAddress string, externalPort int32, maxTries int, nodesHostnames sets.Set[string]) bool {
+	responses := sets.New[string]()
 
 	for i := 0; i < maxTries; i++ {
 		epHostname := pokeEndpointViaExternalContainer(externalContainer, protocol, externalAddress, externalPort, "hostname")
@@ -1457,27 +1455,8 @@ func isPreConfiguredUdnAddressesEnabled() bool {
 	return val == "true"
 }
 
-func singleNodePerZone() bool {
-	if singleNodePerZoneResult == nil {
-		args := []string{"get", "pods", "--selector=app=ovnkube-node", "-o", "jsonpath={.items[0].spec.containers[*].name}"}
-		containerNames := e2ekubectl.RunKubectlOrDie(deploymentconfig.Get().OVNKubernetesNamespace(), args...)
-		result := true
-		for _, containerName := range strings.Split(containerNames, " ") {
-			if containerName == "ovnkube-node" {
-				result = false
-				break
-			}
-		}
-		singleNodePerZoneResult = &result
-	}
-	return *singleNodePerZoneResult
-}
-
 func getNodeContainerName() string {
-	if singleNodePerZone() {
-		return "ovnkube-controller"
-	}
-	return "ovnkube-node"
+	return "ovnkube-controller"
 }
 
 // getNodeZone returns the node's zone
@@ -2015,4 +1994,18 @@ func waitForNodeReadyState(f *framework.Framework, nodeName string, timeout time
 		}
 		return false
 	}, timeout, 10*time.Second).Should(gomega.BeTrue(), expectationMessage)
+}
+
+// firstSubnetOf returns the first subnet of a given size within the provided
+// subnet
+func firstSubnetOf(subnet string, subnetSize int) string {
+	_, ipNet, err := net.ParseCIDR(subnet)
+	if err != nil {
+		panic(fmt.Sprintf("firstSubnetOf: invalid subnet %q: %v", subnet, err))
+	}
+	ones, bits := ipNet.Mask.Size()
+	if subnetSize < ones || subnetSize > bits {
+		panic(fmt.Sprintf("firstSubnetOf: requested size /%d is not between min /%d and max /%d for %s", subnetSize, ones, bits, subnet))
+	}
+	return fmt.Sprintf("%s/%d", ipNet.IP, subnetSize)
 }
