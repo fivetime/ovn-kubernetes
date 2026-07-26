@@ -41,7 +41,7 @@ env:
   REPOSITORY: ovn-kubernetes
   FEDORA_IMAGE_NAME: ovn-kube-fedora
   UBUNTU_IMAGE_NAME: ovn-kube-ubuntu
-  BUILDER_IMAGE: quay.io/projectquay/golang:1.25
+  BUILDER_IMAGE: quay.io/projectquay/golang:1.26
 jobs:
   # Resolve which images / platforms to build. Push events build everything;
   # workflow_dispatch can scope down via inputs.
