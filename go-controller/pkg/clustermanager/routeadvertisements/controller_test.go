@@ -2743,7 +2743,7 @@ exit
 			expectNADAnnotations: map[string]map[string]string{"green": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
 		},
 		{
-			name:                "with dynamic UDN allocation and transit router, advertises an active layer2 network without a tunnel ID allocation",
+			name:                "with dynamic UDN allocation and transit router, advertises an active layer2 network without a tunnel ID allocation and skips inactive nodes",
 			dynamicUDN:          true,
 			layer2TransitRouter: true,
 			ra:                  &testRA{Name: "ra", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
@@ -2764,7 +2764,11 @@ exit
 			namespaces: []*testNamespace{{Name: "green"}},
 			pods:       []*testPod{{Name: "pod", Namespace: "green", Node: "node"}},
 			nodes: []*testNode{
+				// "node" runs a pod attached to the network; "node2" does not.
+				// Neither has a tunnel ID allocation, and only "node" must be
+				// advertised.
 				{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"},
+				{Name: "node2", SubnetsAnnotation: "{\"default\":\"1.1.1.0/24\"}"},
 			},
 			reconcile:            "ra",
 			expectAcceptedStatus: metav1.ConditionTrue,
@@ -3203,6 +3207,12 @@ func TestController_reconcileOnNetworkActivity(t *testing.T) {
 	g.Eventually(raAccepted, 5*time.Second).Should(gomega.BeTrue())
 	g.Expect(generatedFRRConfigs()).To(gomega.BeEmpty())
 
+	// the initial reconcile cached which networks the RouteAdvertisements
+	// selects
+	networkName := util.GenerateCUDNNetworkName("blue")
+	g.Expect(c.getRAsForNetwork(networkName)).To(gomega.ConsistOf("ra"))
+	g.Expect(c.getRAsForNetwork(util.GenerateCUDNNetworkName("red"))).To(gomega.BeEmpty())
+
 	// scheduling a pod on the node activates the network there without
 	// updating any object the controller watches: the network manager
 	// notification must trigger the reconcile that advertises the node
@@ -3211,6 +3221,11 @@ func TestController_reconcileOnNetworkActivity(t *testing.T) {
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 
 	g.Eventually(generatedFRRConfigs, 5*time.Second).Should(gomega.ConsistOf("ra/frrConfig/node"))
+
+	// deleting the RouteAdvertisements removes it from the cache
+	err = fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Delete(context.Background(), "ra", metav1.DeleteOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	g.Eventually(func() []string { return c.getRAsForNetwork(networkName) }, 5*time.Second).Should(gomega.BeEmpty())
 }
 
 func TestUpdates(t *testing.T) {
