@@ -232,7 +232,6 @@ type egressIPNamespace struct{}
 type egressNode struct{}
 
 // types for handlers in use by ovn-k node
-type namespaceExGw struct{}
 type endpointSliceForStaleConntrackRemoval struct{}
 type serviceForGateway struct{}
 type endpointSliceForGateway struct{}
@@ -267,7 +266,6 @@ var (
 	NetworkQoSType                  reflect.Type = reflect.TypeOf(&networkqosapi.NetworkQoS{})
 	ClusterNetworkConnectType       reflect.Type = reflect.TypeOf(&networkconnectapi.ClusterNetworkConnect{})
 	// Resource types used in ovnk node
-	NamespaceExGwType                         reflect.Type = reflect.TypeOf(&namespaceExGw{})
 	EndpointSliceForStaleConntrackRemovalType reflect.Type = reflect.TypeOf(&endpointSliceForStaleConntrackRemoval{})
 	ServiceForGatewayType                     reflect.Type = reflect.TypeOf(&serviceForGateway{})
 	EndpointSliceForGatewayType               reflect.Type = reflect.TypeOf(&endpointSliceForGateway{})
@@ -317,6 +315,22 @@ func informerObjectTrim(obj interface{}) (interface{}, error) {
 			pod.Status.Conditions[i].Message = ""
 			pod.Status.Conditions[i].ObservedGeneration = 0
 		}
+	}
+	if node, ok := obj.(*corev1.Node); ok {
+		// OVN-K does not consume these node fields from informer cache.
+		node.Status.Images = nil
+		node.Status.VolumesAttached = nil
+		node.Status.VolumesInUse = nil
+		node.Status.DaemonEndpoints = corev1.NodeDaemonEndpoints{}
+		node.Status.Capacity = nil
+		node.Status.Allocatable = nil
+		node.Status.Config = nil
+		node.Status.RuntimeHandlers = nil
+		node.Status.Features = nil
+		node.Spec.Taints = nil
+		node.Spec.PodCIDRs = nil
+		node.OwnerReferences = nil
+		node.Finalizers = nil
 	}
 	return obj, nil
 }
@@ -1383,7 +1397,7 @@ func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) 
 func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandlerFuncType, error) {
 	priority := wf.GetHandlerPriority(objType)
 	switch objType {
-	case NamespaceType, NamespaceExGwType:
+	case NamespaceType:
 		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddNamespaceHandler(funcs, processExisting)
 		}, nil

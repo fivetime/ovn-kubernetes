@@ -896,14 +896,6 @@ function memory_trim_on_compaction_supported {
   fi
 }
 
-function get_node_zone() {
-  # Single-node-zone is the only supported interconnect topology: each node is
-  # its own zone, named after the kube node. In DPU mode, K8S_NODE has already
-  # been overridden earlier in this script from the OVS external_id
-  # host-k8s-nodename, so it carries the DPU-host's node name.
-  echo "${K8S_NODE}"
-}
-
 # v1.0.0 - run nb_ovsdb in a separate container listening only on
 # unix sockets
 local-nb-ovsdb() {
@@ -1226,9 +1218,6 @@ ovnkube-controller() {
   fi
   echo "ovnkube_config_duration_enable_flag: ${ovnkube_config_duration_enable_flag}"
 
-  ovn_zone=$(get_node_zone)
-  echo "ovnkube-controller's configured zone is ${ovn_zone}"
-
   ovnkube_enable_multi_external_gateway_flag=
   if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
 	  ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
@@ -1345,8 +1334,7 @@ ovnkube-controller() {
     --metrics-bind-address ${ovnkube_controller_metrics_bind_address} \
     --metrics-enable-pprof \
     --ovn-config-namespace ${ovn_kubernetes_namespace} \
-    --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid \
-    --zone ${ovn_zone} &
+    --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid &
 
   echo "=============== ovnkube-controller ========== running"
   wait_for_event attempts=3 process_ready ovnkube-controller
@@ -1674,9 +1662,6 @@ ovnkube-controller-with-node() {
   fi
   echo "ovnkube_config_duration_enable_flag: ${ovnkube_config_duration_enable_flag}"
 
-  ovn_zone=$(get_node_zone)
-  echo "ovnkube-controller-with-node's configured zone is ${ovn_zone}"
-
   ovnkube_enable_multi_external_gateway_flag=
   if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
 	  ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
@@ -1884,8 +1869,7 @@ ovnkube-controller-with-node() {
     --nodeport \
     --ovn-config-namespace ${ovn_kubernetes_namespace} \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
-    --pidfile ${OVN_RUNDIR}/ovnkube-controller-with-node.pid \
-    --zone ${ovn_zone} &
+    --pidfile ${OVN_RUNDIR}/ovnkube-controller-with-node.pid &
 
   wait_for_event attempts=3 process_ready ovnkube-controller-with-node
   if [[ ${ovnkube_node_mode} != "dpu" ]]; then
@@ -2461,9 +2445,6 @@ ovn-node() {
       "
   fi
 
-  ovn_zone=$(get_node_zone)
-  echo "ovnkube-node's configured zone is ${ovn_zone}"
-
   ovnkube_enable_multi_external_gateway_flag=
   if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
 	  ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
@@ -2594,8 +2575,7 @@ ovn-node() {
         --nodeport \
         --ovn-config-namespace ${ovn_kubernetes_namespace} \
         --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
-        --pidfile ${OVN_RUNDIR}/ovnkube.pid \
-        --zone ${ovn_zone} &
+        --pidfile ${OVN_RUNDIR}/ovnkube.pid &
 
   wait_for_event attempts=3 process_ready ovnkube
   if [[ ${ovnkube_node_mode} != "dpu" ]]; then

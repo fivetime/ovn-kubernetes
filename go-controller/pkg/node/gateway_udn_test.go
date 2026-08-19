@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/netip"
 	"sort"
 	"strings"
 	"sync"
@@ -504,6 +505,13 @@ func setManagementPortFakeCommands(fexec *ovntest.FakeExec, nodeName string) {
 func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 	// GetNicName lookups (list-ports / get Port Interfaces / get Interface Type)
 	// are now served by the libovsdb harness seeded in BeforeEach.
+	// getGatewayNextHops rewrites eth0 → breth0; GetPortBridge hides the
+	// bridge local port, so NewBridgeConfiguration takes the "is a bridge"
+	// path and getIntfName verifies eth0's ofport first.
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-vsctl --timeout=15 get interface eth0 ofport",
+		Output: "7",
+	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
 		Output: "00:00:00:55:66:99",
@@ -536,13 +544,13 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 		Output: "5",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 get interface breth0 ofport",
+		Cmd:    "ovs-vsctl --timeout=15 get interface eth0 ofport",
 		Output: "7",
 	})
 	// newNodePortWatcher() looks up the physical interface's ofport via exec;
 	// this is unrelated to checkPorts(), which now reads it from libovsdb.
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 ofport",
+		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface eth0 ofport",
 		Output: "7",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -820,9 +828,12 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 					Name:  "breth0",
 					Ports: []string{"breth0-port-uuid", "eth0-port-uuid"},
 				},
+				// Local port of the bridge (hidden by GetPortBridge / port-to-br).
 				&vswitchd.Port{UUID: "breth0-port-uuid", Name: "breth0", Interfaces: []string{"breth0-iface-uuid"}},
-				&vswitchd.Interface{UUID: "breth0-iface-uuid", Name: "breth0", Type: "system", Ofport: ptr.To(7)},
-				&vswitchd.Port{UUID: "eth0-port-uuid", Name: "eth0"},
+				&vswitchd.Interface{UUID: "breth0-iface-uuid", Name: "breth0", Type: "internal", Ofport: ptr.To(65534)},
+				// Physical uplink: system-typed so GetNicName resolves eth0.
+				&vswitchd.Port{UUID: "eth0-port-uuid", Name: "eth0", Interfaces: []string{"eth0-iface-uuid"}},
+				&vswitchd.Interface{UUID: "eth0-iface-uuid", Name: "eth0", Type: "system", Ofport: ptr.To(7)},
 			},
 		})
 		Expect(ovsErr).NotTo(HaveOccurred())
@@ -974,8 +985,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
 		factoryMock.On("GetNodeForWindows", "worker1").Return(node, nil)
-		cnode := node.DeepCopy()
-		kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 			ofm := getDummyOpenflowManager()
@@ -1065,8 +1074,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		getDeletionFakeOVSCommands(fexec, mgtPort)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
 		factoryMock.On("GetNodeForWindows", "worker1").Return(node, nil)
-		cnode := node.DeepCopy()
-		kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 			ofm := getDummyOpenflowManager()
@@ -1292,8 +1299,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			removeOVSPatchPortInterface(ovsClient, "breth0", "patch-breth0_bluenet_worker1-to-br-int")
 			openflowManagerCheckPorts(udnGateway.openflowManager)
 
-			cnode := node.DeepCopy()
-			kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 			Expect(udnGateway.DelNetwork()).To(Succeed())
 			flowMap = udnGateway.gateway.openflowManager.defaultBridge.flowCache
 			Expect(flowMap["DEFAULT"]).To(HaveLen(baseFlowCount))
@@ -1719,8 +1724,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			removeOVSPatchPortInterface(ovsClient, "breth0", "patch-breth0_bluenet_worker1-to-br-int")
 			openflowManagerCheckPorts(udnGateway.openflowManager)
 
-			cnode := node.DeepCopy()
-			kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 			Expect(udnGateway.DelNetwork()).To(Succeed())
 			flowMap = udnGateway.gateway.openflowManager.defaultBridge.flowCache
 			Expect(flowMap["DEFAULT"]).To(HaveLen(baseFlowCount))
@@ -1966,8 +1969,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			removeOVSPatchPortInterface(ovsClient, "breth0", "patch-breth0_bluenet_worker1-to-br-int")
 			openflowManagerCheckPorts(udnGateway.openflowManager)
 
-			cnode := node.DeepCopy()
-			kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 			Expect(udnGateway.DelNetwork()).To(Succeed())
 			flowMap = udnGateway.gateway.openflowManager.defaultBridge.flowCache
 			Expect(flowMap["DEFAULT"]).To(HaveLen(baseFlowCount))
@@ -2742,7 +2743,7 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 		family   int
 		table    int
 		mark     uint32
-		dst      net.IPNet
+		dst      netip.Prefix
 	}
 	type testConfig struct {
 		desc          string
@@ -2773,7 +2774,7 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1007,
-					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
+					dst:      netip.MustParsePrefix("169.254.0.16/32"),
 				},
 			},
 			deleteRules: []testRule{
@@ -2781,7 +2782,7 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1007,
-					dst:      *ovntest.MustParseIPNet("100.128.0.0/16"),
+					dst:      netip.MustParsePrefix("100.128.0.0/16"),
 				},
 			},
 			v4mode: true,
@@ -2800,7 +2801,7 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V6,
 					table:    1009,
-					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("fd69::10")),
+					dst:      netip.MustParsePrefix("fd69::10/128"),
 				},
 			},
 			deleteRules: []testRule{
@@ -2808,7 +2809,7 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V6,
 					table:    1009,
-					dst:      *ovntest.MustParseIPNet("ae70::/60"),
+					dst:      netip.MustParsePrefix("ae70::/60"),
 				},
 			},
 			v6mode: true,
@@ -2833,13 +2834,13 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1010,
-					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
+					dst:      netip.MustParsePrefix("169.254.0.16/32"),
 				},
 				{
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V6,
 					table:    1010,
-					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("fd69::10")),
+					dst:      netip.MustParsePrefix("fd69::10/128"),
 				},
 			},
 			deleteRules: []testRule{
@@ -2847,13 +2848,13 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1010,
-					dst:      *ovntest.MustParseIPNet("100.128.0.0/16"),
+					dst:      netip.MustParsePrefix("100.128.0.0/16"),
 				},
 				{
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V6,
 					table:    1010,
-					dst:      *ovntest.MustParseIPNet("ae70::/60"),
+					dst:      netip.MustParsePrefix("ae70::/60"),
 				},
 			},
 			v4mode: true,
@@ -2910,8 +2911,8 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 				g.Expect(rule.Priority).To(Equal(test.expectedRules[i].priority))
 				g.Expect(rule.Table).To(Equal(test.expectedRules[i].table))
 				g.Expect(rule.Family).To(Equal(test.expectedRules[i].family))
-				if rule.Dst != nil {
-					g.Expect(*rule.Dst).To(Equal(test.expectedRules[i].dst))
+				if rule.Dst.IsValid() {
+					g.Expect(rule.Dst).To(Equal(test.expectedRules[i].dst))
 				} else {
 					g.Expect(rule.Mark).To(Equal(test.expectedRules[i].mark))
 				}
@@ -2920,7 +2921,7 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 				g.Expect(rule.Priority).To(Equal(test.deleteRules[i].priority))
 				g.Expect(rule.Table).To(Equal(test.deleteRules[i].table))
 				g.Expect(rule.Family).To(Equal(test.deleteRules[i].family))
-				g.Expect(*rule.Dst).To(Equal(test.deleteRules[i].dst))
+				g.Expect(rule.Dst).To(Equal(test.deleteRules[i].dst))
 			}
 		})
 	}
@@ -2935,7 +2936,7 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToDefaultVRF(t *testing.T) {
 		family   int
 		table    int
 		mark     uint32
-		dst      net.IPNet
+		dst      netip.Prefix
 	}
 	type testConfig struct {
 		desc          string
@@ -2961,13 +2962,13 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToDefaultVRF(t *testing.T) {
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1007,
-					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
+					dst:      netip.MustParsePrefix("169.254.0.16/32"),
 				},
 				{
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1007,
-					dst:      *ovntest.MustParseIPNet("100.128.0.0/16"),
+					dst:      netip.MustParsePrefix("100.128.0.0/16"),
 				},
 			},
 			v4mode: true,
@@ -2986,13 +2987,13 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToDefaultVRF(t *testing.T) {
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V6,
 					table:    1009,
-					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("fd69::10")),
+					dst:      netip.MustParsePrefix("fd69::10/128"),
 				},
 				{
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V6,
 					table:    1009,
-					dst:      *ovntest.MustParseIPNet("ae70::/60"),
+					dst:      netip.MustParsePrefix("ae70::/60"),
 				},
 			},
 			v6mode: true,
@@ -3017,25 +3018,25 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToDefaultVRF(t *testing.T) {
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1010,
-					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
+					dst:      netip.MustParsePrefix("169.254.0.16/32"),
 				},
 				{
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V6,
 					table:    1010,
-					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("fd69::10")),
+					dst:      netip.MustParsePrefix("fd69::10/128"),
 				},
 				{
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1010,
-					dst:      *ovntest.MustParseIPNet("100.128.0.0/16"),
+					dst:      netip.MustParsePrefix("100.128.0.0/16"),
 				},
 				{
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V6,
 					table:    1010,
-					dst:      *ovntest.MustParseIPNet("ae70::/60"),
+					dst:      netip.MustParsePrefix("ae70::/60"),
 				},
 			},
 			v4mode: true,
@@ -3096,8 +3097,8 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToDefaultVRF(t *testing.T) {
 				g.Expect(rule.Priority).To(Equal(test.expectedRules[i].priority))
 				g.Expect(rule.Table).To(Equal(test.expectedRules[i].table))
 				g.Expect(rule.Family).To(Equal(test.expectedRules[i].family))
-				if rule.Dst != nil {
-					g.Expect(*rule.Dst).To(Equal(test.expectedRules[i].dst))
+				if rule.Dst.IsValid() {
+					g.Expect(rule.Dst).To(Equal(test.expectedRules[i].dst))
 				} else {
 					g.Expect(rule.Mark).To(Equal(test.expectedRules[i].mark))
 				}
@@ -3106,7 +3107,7 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToDefaultVRF(t *testing.T) {
 				g.Expect(rule.Priority).To(Equal(test.deleteRules[i].priority))
 				g.Expect(rule.Table).To(Equal(test.deleteRules[i].table))
 				g.Expect(rule.Family).To(Equal(test.deleteRules[i].family))
-				g.Expect(*rule.Dst).To(Equal(test.deleteRules[i].dst))
+				g.Expect(rule.Dst).To(Equal(test.deleteRules[i].dst))
 			}
 		})
 	}
@@ -3121,7 +3122,7 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToNonDefaultVRF(t *testing.T)
 		family   int
 		table    int
 		mark     uint32
-		dst      net.IPNet
+		dst      netip.Prefix
 	}
 	type testConfig struct {
 		desc          string
@@ -3147,7 +3148,7 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToNonDefaultVRF(t *testing.T)
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1007,
-					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
+					dst:      netip.MustParsePrefix("169.254.0.16/32"),
 				},
 			},
 			deleteRules: []testRule{
@@ -3155,7 +3156,7 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToNonDefaultVRF(t *testing.T)
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1007,
-					dst:      *ovntest.MustParseIPNet("100.128.0.0/16"),
+					dst:      netip.MustParsePrefix("100.128.0.0/16"),
 				},
 			},
 			v4mode: true,
@@ -3174,7 +3175,7 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToNonDefaultVRF(t *testing.T)
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V6,
 					table:    1009,
-					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("fd69::10")),
+					dst:      netip.MustParsePrefix("fd69::10/128"),
 				},
 			},
 			deleteRules: []testRule{
@@ -3182,7 +3183,7 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToNonDefaultVRF(t *testing.T)
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V6,
 					table:    1009,
-					dst:      *ovntest.MustParseIPNet("ae70::/60"),
+					dst:      netip.MustParsePrefix("ae70::/60"),
 				},
 			},
 			v6mode: true,
@@ -3207,13 +3208,13 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToNonDefaultVRF(t *testing.T)
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1010,
-					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("169.254.0.16")),
+					dst:      netip.MustParsePrefix("169.254.0.16/32"),
 				},
 				{
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V6,
 					table:    1010,
-					dst:      *util.GetIPNetFullMaskFromIP(ovntest.MustParseIP("fd69::10")),
+					dst:      netip.MustParsePrefix("fd69::10/128"),
 				},
 			},
 			deleteRules: []testRule{
@@ -3221,13 +3222,13 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToNonDefaultVRF(t *testing.T)
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V4,
 					table:    1010,
-					dst:      *ovntest.MustParseIPNet("100.128.0.0/16"),
+					dst:      netip.MustParsePrefix("100.128.0.0/16"),
 				},
 				{
 					priority: UDNMasqueradeIPRulePriority,
 					family:   netlink.FAMILY_V6,
 					table:    1010,
-					dst:      *ovntest.MustParseIPNet("ae70::/60"),
+					dst:      netip.MustParsePrefix("ae70::/60"),
 				},
 			},
 			v4mode: true,
@@ -3290,8 +3291,8 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToNonDefaultVRF(t *testing.T)
 				g.Expect(rule.Priority).To(Equal(test.expectedRules[i].priority))
 				g.Expect(rule.Table).To(Equal(test.expectedRules[i].table))
 				g.Expect(rule.Family).To(Equal(test.expectedRules[i].family))
-				if rule.Dst != nil {
-					g.Expect(*rule.Dst).To(Equal(test.expectedRules[i].dst))
+				if rule.Dst.IsValid() {
+					g.Expect(rule.Dst).To(Equal(test.expectedRules[i].dst))
 				} else {
 					g.Expect(rule.Mark).To(Equal(test.expectedRules[i].mark))
 				}
@@ -3300,7 +3301,7 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToNonDefaultVRF(t *testing.T)
 				g.Expect(rule.Priority).To(Equal(test.deleteRules[i].priority))
 				g.Expect(rule.Table).To(Equal(test.deleteRules[i].table))
 				g.Expect(rule.Family).To(Equal(test.deleteRules[i].family))
-				g.Expect(*rule.Dst).To(Equal(test.deleteRules[i].dst))
+				g.Expect(rule.Dst).To(Equal(test.deleteRules[i].dst))
 			}
 		})
 	}
