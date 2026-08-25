@@ -1342,6 +1342,8 @@
       
         
       
+        
+      
     
     
     
@@ -1689,6 +1691,34 @@
     
   
     Release Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../developer-guide/maintenance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Maintenance Guide
   
 
     
@@ -2677,6 +2707,17 @@
     <span class="md-ellipsis">
       
         Introduction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#node-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Node Requirements
       
     </span>
   </a>
@@ -4143,6 +4184,8 @@
       
         
       
+        
+      
     
     
     
@@ -4615,6 +4658,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../okeps/okep-5212-ovnobserv-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OVN Observability API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -4815,6 +4886,17 @@
     <span class="md-ellipsis">
       
         Introduction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#node-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Node Requirements
       
     </span>
   </a>
@@ -5029,6 +5111,31 @@ East-West traffic (including pod -&gt; node IP) is excluded from Egress IP.  </p
 - <a href="https://docs.okd.io/latest/networking/ovn_kubernetes_network_provider/assigning-egress-ips-ovn.html">Assigning an egress IP address</a>
 - <a href="https://rcarrata.com/openshift/egress-ip-ovn/">Managing Egress IP in OpenShift 4 with OVN-Kubernetes</a></p>
 <p>Always check the dependencies on the <a href="../../requirements/">Requirements page</a></p>
+<h2 id="node-requirements">Node Requirements<a class="headerlink" href="#node-requirements" title="Permanent link">¶</a></h2>
+<p>The <code>k8s.ovn.org/host-cidrs</code> annotation is automatically set during node bootstrap and
+contains the node's host network CIDR(s). A node can be missing this annotation if it is
+stuck in <code>NodeStatusNeverUpdated</code>, was orphaned by the cluster autoscaler, or was never
+properly bootstrapped.</p>
+<p>Such a node is handled in two places:</p>
+<ul>
+<li><strong>Conflict detection</strong> skips the node. The annotation is the only source of the node's
+  host addresses, so without it there is no data to check the requested egress IP against.
+  Skipping means the check cannot prove the address is free on that node — it does not mean
+  the node has no conflicting address.</li>
+<li><strong>Node assignability</strong> excludes the node. A node whose <code>host-cidrs</code> annotation is missing,
+  cannot be parsed, or contains no addresses is marked not assignable even when it carries
+  the <code>k8s.ovn.org/egress-assignable</code> label, and any EgressIPs already assigned to it are
+  released so they can move to an eligible node.</li>
+</ul>
+<p>Together these prevent a single misconfigured or orphaned node from failing EgressIP
+assignment cluster-wide, while keeping it out of the pool of assignment candidates.</p>
+<p><strong>Important:</strong> Conflict protection is not enforced for a node in this state. Restore the
+node's <code>host-cidrs</code> annotation, or remove the stale node from the cluster, before relying
+on conflict detection to catch an egress IP that collides with a host address.</p>
+<p><strong>Troubleshooting:</strong> If an EgressIP is not assigned to an expected node, verify the node
+has the <code>k8s.ovn.org/host-cidrs</code> annotation set:</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>get<span class="w"> </span>node<span class="w"> </span>&lt;node-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.metadata.annotations.k8s\.ovn\.org/host-cidrs}'</span>
+</code></pre></div>
 <h2 id="example">Example<a class="headerlink" href="#example" title="Permanent link">¶</a></h2>
 <p>An example of EgressIP might look like this:</p>
 <p></p><div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">k8s.ovn.org/v1</span>
@@ -5264,7 +5371,7 @@ egressip-node-healthcheck-port=9107
 <p><strong>Note:</strong> If not specifying a value, or using <code>0</code> as the <code>egressip-node-healthcheck-port</code> will make Egress IP reachability probe the egress nodes using the DISCARD port method. Unlike egressip-reachability-total-timeout, it is important that both node and master pods of ovnkube get configured with the same value!</p>
 <h4 id="additional-details-on-the-implementation-of-the-grpc-probing">Additional details on the implementation of the gRPC probing:<a class="headerlink" href="#additional-details-on-the-implementation-of-the-grpc-probing" title="Permanent link">¶</a></h4>
 <ul>
-<li>If available, the session uses the <a href="https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/healthcheck/egressip_healthcheck.go#L78">same TLS certs</a> used by ovnkube to connect to the northbound OVSDB server. Conversely, an insecure gRPC session is used when no certs are specified.</li>
+<li>If configured, the session uses the certificates from the <code>[egressip-healthcheck-tls]</code> configuration section. The historical <code>--nb-client-*</code> flags and <code>[ovnnorth]</code> configuration keys remain accepted for compatibility. An insecure gRPC session is used when no certificates are specified.</li>
 <li>The <a href="https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/healthcheck/health.proto#L6">message used for probing</a> is the <a href="https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto">standard service health</a> specified in gRPC.</li>
 <li><a href="https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/healthcheck/egressip_healthcheck.go#L193-L195">Special care was taken into consideration</a> to handle cases when the gRPC session bounced for normal reasons. EgressIP implementation will not declare a node unreachable under these circumstances.</li>
 </ul>

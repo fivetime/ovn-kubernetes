@@ -1482,6 +1482,8 @@ controllers run per zone in the ovnkube-node pods.">
       
         
       
+        
+      
     
     
     
@@ -1829,6 +1831,34 @@ controllers run per zone in the ovnkube-node pods.">
     
   
     Release Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer-guide/maintenance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Maintenance Guide
   
 
     
@@ -4040,6 +4070,8 @@ controllers run per zone in the ovnkube-node pods.">
       
         
       
+        
+      
     
     
     
@@ -4512,6 +4544,34 @@ controllers run per zone in the ovnkube-node pods.">
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../okeps/okep-5212-ovnobserv-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OVN Observability API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -4880,7 +4940,7 @@ network policies, CRs</li>
 </li>
 <li>ovn-controller container:<ul>
 <li>Native OVN component</li>
-<li>Connects to SBDB running in control plane using TLS</li>
+<li>Connects to the local SBDB over a Unix socket</li>
 <li>Converts SBDB logical flows into openflows</li>
 <li>Write them to OVS</li>
 </ul>
