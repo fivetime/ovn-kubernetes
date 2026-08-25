@@ -70,10 +70,14 @@ jobs:
             [[ "$images" == both || "$images" == ubuntu ]] && bu=true || bu=false
           fi
 
+          # Each arch builds on a native GitHub-hosted runner -- free for
+          # public repos, including the arm64 fleet -- so no QEMU emulation.
+          amd64_entry='{"platform":"linux/amd64","arch":"amd64","runner":"ubuntu-24.04"}'
+          arm64_entry='{"platform":"linux/arm64","arch":"arm64","runner":"ubuntu-24.04-arm"}'
           case "$platforms" in
-            both)  pm='[{"platform":"linux/amd64","arch":"amd64"},{"platform":"linux/arm64","arch":"arm64"}]' ;;
-            amd64) pm='[{"platform":"linux/amd64","arch":"amd64"}]' ;;
-            arm64) pm='[{"platform":"linux/arm64","arch":"arm64"}]' ;;
+            both)  pm="[${amd64_entry},${arm64_entry}]" ;;
+            amd64) pm="[${amd64_entry}]" ;;
+            arm64) pm="[${arm64_entry}]" ;;
           esac
 
           # Empty matrix when image isn't selected; GitHub Actions then skips
@@ -114,7 +118,7 @@ jobs:
   build-fedora:
     name: Build Fedora (${{ matrix.platform }})
     needs: discover
-    runs-on: self-hosted
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: true
       matrix:
@@ -177,10 +181,7 @@ jobs:
 
     - name: Export digest
       run: |
-        # Use runner.temp (auto-cleaned per job) instead of /tmp/digests,
-        # which on a long-lived self-hosted runner accumulates digests from
-        # every previous job and causes Merge to attempt tagging
-        # already-overwritten manifests.
+        # runner.temp is per-job, so digests never leak between runs.
         mkdir -p "${RUNNER_TEMP}/digests"
         digest="${{ steps.build.outputs.digest }}"
         touch "${RUNNER_TEMP}/digests/${digest#sha256:}"
@@ -199,7 +200,7 @@ jobs:
     needs: [discover, build-fedora]
     # See comment on merge-ubuntu's `if:` (added in the previous commit).
     if: needs.discover.outputs.build_fedora == 'true'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
     - name: Download digests
       uses: actions/download-artifact@v8
@@ -244,7 +245,7 @@ jobs:
   build-ubuntu:
     name: Build Ubuntu (${{ matrix.platform }})
     needs: discover
-    runs-on: self-hosted
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: true
       matrix:
@@ -281,8 +282,10 @@ jobs:
     # TODO: this is not hermetic; switch to in-docker build of binaries
     - name: Build ovnkube-binaries and stage image context
       env:
-        # build-go.sh uses CGO_ENABLED=0, so GOARCH alone cross-compiles
-        # cleanly without needing a C toolchain for the target arch.
+        # Native on both runners now, but keep GOARCH explicit so the
+        # binaries never depend on the runner's default. build-go.sh uses
+        # CGO_ENABLED=0, so this also cross-compiles cleanly if the matrix
+        # ever pairs an arch with a non-matching runner again.
         GOARCH: ${{ matrix.arch }}
       run: |
         make -C dist/images bld
@@ -341,7 +344,7 @@ jobs:
     needs: [discover, build-ubuntu]
     # See comment on merge-fedora's `if:`.
     if: needs.discover.outputs.build_ubuntu == 'true'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
     - name: Download digests
       uses: actions/download-artifact@v8
